@@ -1,0 +1,8 @@
+# Build artifacts
+benchmark
+*.o
+*.out
+a.exe
+
+# Generated results (keep the folder via results/.gitkeep, ignore CSVs)
+results/*.csv
