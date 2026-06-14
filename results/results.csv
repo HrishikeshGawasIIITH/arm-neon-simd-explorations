@@ -1,0 +1,5 @@
+kernel,size,scalar_ms,neon_ms,speedup,correct
+vector_add,1048576 elems,2.979,2.756,1.081,1
+collision,1048576 circles,4.701,3.441,1.366,1
+matrix_multiply,256x256,115.377,10.085,11.440,1
+fir_filter,1048561 out / 16 taps,29.763,7.940,3.748,1

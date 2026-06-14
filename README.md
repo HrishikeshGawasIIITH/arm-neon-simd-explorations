@@ -5,8 +5,8 @@
 **NEON** is Arm's Advanced SIMD (Single Instruction, Multiple Data) extension. Where a
 normal instruction operates on one value at a time, a NEON instruction operates on a whole
 vector of values packed into a 128-bit register at once — for example four 32-bit floats, or
-sixteen 8-bit bytes. The Cortex-A72 in a Raspberry Pi 4B has thirty-two of these registers,
-so loops that do the same arithmetic over large arrays (image processing, DSP, physics,
+sixteen 8-bit bytes. An ARMv8-A core (such as the Cortex-A72) has thirty-two of these
+registers, so loops that do the same arithmetic over large arrays (image processing, DSP, physics,
 linear algebra) can run several times faster for free — using compute the CPU already has but
 that plain C leaves idle. This repo demonstrates that with four small kernels, each written
 twice — once in plain C, once in hand-written NEON intrinsics — and a benchmark that times
@@ -20,7 +20,7 @@ showcase.
 
 ```
 arm-neon-simd-explorations/
-├── docs/                     # the original project decks (background reading)
+├── docs/                     # the project decks — a primary contribution (see Documentation)
 │   ├── PPT 1.pdf             # NEON / SIMD overview + worked collision example
 │   └── Arm_neon_intrinsic_library_functions.pdf   # catalogue of intrinsic categories
 ├── examples/                 # the kernels, each as scalar + NEON
@@ -42,11 +42,11 @@ and reports the speedup.
 
 ## Build & run
 
-This is meant to run **natively on the Raspberry Pi** (or any AArch64 Linux machine), where
-`arm_neon.h` and the NEON instructions are available out of the box.
+The benchmark runs on **any Linux machine with an Arm NEON-capable CPU** (any AArch64 / 64-bit
+Arm core), where `arm_neon.h` and the NEON instructions are available out of the box. The
+results below were measured on a Raspberry Pi 4B.
 
 ```sh
-# on the Pi
 git clone <your-repo-url> arm-neon-simd-explorations
 cd arm-neon-simd-explorations
 make run
@@ -68,37 +68,63 @@ gcc -O2 yourfile.c -o yourfile -lm   # AArch64: NEON needs no extra flags
 ./yourfile
 ```
 
-### Example results
+### Results
 
-Run `make run` on your own Pi to populate this — actual numbers depend on your hardware,
-kernel sizes, and compiler. The table below is **illustrative** of the shape of the results
-(scalar vs NEON, with the speedup varying by how compute- vs memory-bound each kernel is):
+`make run` builds the benchmark, runs every kernel, and writes
+[`results/results.csv`](results/results.csv). The numbers below were measured on a **Raspberry
+Pi 4B (Cortex-A72, 64-bit Linux)**; yours will differ with hardware, kernel sizes, and compiler,
+but the *shape* — NEON pulling furthest ahead on compute-bound work — holds.
 
-| Kernel          | Size              | Scalar (ms) | NEON (ms) | Speedup | Correct |
-|-----------------|-------------------|-------------|-----------|---------|---------|
-| vector_add      | 1048576 elems     |        _…_  |    _…_    |  _~1–2x_ | yes     |
-| collision       | 1048576 circles   |        _…_  |    _…_    |  _~3–4x_ | yes     |
-| matrix_multiply | 256x256           |        _…_  |    _…_    |  _~4–6x_ | yes     |
-| fir_filter      | 1048561 out / 16 taps |    _…_  |    _…_    |  _~3–4x_ | yes     |
+| Kernel          | Size                  | Scalar (ms) | NEON (ms) | Speedup | Correct |
+|-----------------|-----------------------|-------------|-----------|---------|---------|
+| vector_add      | 1048576 elems         |       2.979 |     2.756 |   1.08x | yes     |
+| collision       | 1048576 circles       |       4.701 |     3.441 |   1.37x | yes     |
+| matrix_multiply | 256x256               |     115.377 |    10.085 |  11.44x | yes     |
+| fir_filter      | 1048561 out / 16 taps |      29.763 |     7.940 |   3.75x | yes     |
 
-`vector_add` gains the least because it is limited by memory bandwidth (one add per element);
-`matrix_multiply` gains the most because it is compute-bound and NEON's fused
-multiply-accumulate does four lanes at once.
+`vector_add` gains the least (**1.08x**): it is limited by memory bandwidth — one add per
+element, so the CPU spends its time moving data rather than computing. `matrix_multiply` gains
+the most (**11.44x**): it is compute-bound and NEON's fused multiply-accumulate does four lanes
+per instruction. `fir_filter` (**3.75x**) and `collision` (**1.37x**) fall in between, set by
+how much arithmetic each does per byte of data it loads.
+
+## Documentation
+
+Alongside the benchmark, the two decks in [`docs/`](docs/) are a primary part of this project —
+the written explanation of *how* and *why* NEON works that the code then puts into practice.
+They stand on their own as a compact introduction to programming the NEON coprocessor:
+
+- **[NEON / SIMD overview — `docs/PPT 1.pdf`](docs/PPT%201.pdf)** — *Harvesting Existing
+  Compute Power in ARM using the NEON Coprocessor.* The main presentation: what SIMD is and the
+  three execution models (SISD → vector-mode VFP → packed SIMD), vectorization, NEON compared
+  with x86 MMX/SSE and Altivec, the four ways to use NEON (auto-vectorization, intrinsics,
+  libraries, hand-written assembly), a step-by-step walk-through of the collision-detection
+  example (scalar → basic → advanced de-interleaved intrinsics), the intrinsic naming
+  convention and data types, feature macros, and tips for helping the compiler auto-vectorize.
+
+- **[Intrinsic function reference — `docs/Arm_neon_intrinsic_library_functions.pdf`](docs/Arm_neon_intrinsic_library_functions.pdf)**
+  — a categorized catalogue of the NEON intrinsic families: bit manipulation, compare, complex
+  arithmetic, load/store, shift, logical, data-type conversions, move, vector and scalar
+  arithmetic, vector manipulation, and transpose operations.
+
+The kernels in [`examples/`](examples/) are the runnable counterpart to this material.
 
 ## Platform
 
-- **Target board:** Raspberry Pi 4B — Broadcom BCM2711, quad-core Cortex-A72 (ARMv8-A),
-  64-bit, **2 GB RAM**, running 64-bit Linux (e.g. Ubuntu Server 22.04 / Raspberry Pi OS).
-- **NEON on AArch64:** Advanced SIMD is part of the baseline 64-bit Arm ISA, so the intrinsics
-  compile with a plain `gcc` — no `-mfpu` flag needed. (On a 32-bit Arm userland you would add
-  `-mfpu=neon -mfloat-abi=hard`; see the commented line in the `Makefile`.)
-- **Memory:** the Pi only has 2 GB, so the benchmark allocates each kernel's buffers, uses
-  them, and frees them before moving to the next kernel — peak footprint is about one kernel's
-  working set (~16 MB). All sizes are `#define`d at the top of `bench/benchmark.c` if you want
-  to scale them down further.
+- **Where it runs:** any Linux machine with an Arm NEON-capable CPU. On AArch64 (64-bit Arm)
+  Advanced SIMD is part of the baseline ISA, so the intrinsics compile with a plain `gcc` — no
+  `-mfpu` flag needed. (On a 32-bit Arm userland you would add `-mfpu=neon -mfloat-abi=hard`;
+  see the commented line in the `Makefile`.)
+- **Where we ran it:** Raspberry Pi 4B — Broadcom BCM2711, quad-core Cortex-A72 (ARMv8-A),
+  64-bit, 2 GB RAM, running 64-bit Linux (Ubuntu Server 22.04).
+- **Memory-conscious by design:** the benchmark allocates each kernel's buffers, uses them, and
+  frees them before moving to the next kernel — peak footprint is about one kernel's working set
+  (~16 MB), which kept it comfortable even on the Pi's 2 GB. All sizes are `#define`d at the top
+  of `bench/benchmark.c` if you want to scale them.
 
-## Background
+## References
 
-For the full story — what SIMD is, the different ways to use NEON (auto-vectorisation,
-intrinsics, libraries, assembly), the intrinsic naming convention and data types, and a
-step-by-step walk-through of the collision-detection example — see the decks in [`docs/`](docs/).
+- [Arm NEON intrinsics search](https://developer.arm.com/architectures/instruction-sets/intrinsics/)
+- [Arm C Language Extensions (ACLE)](https://developer.arm.com/Architectures/Arm%20C%20Language%20Extensions)
+- [Optimizing C code with NEON intrinsics (102467)](https://developer.arm.com/documentation/102467/latest/)
+- [NEON Programmer's Guide (DEN0018)](https://developer.arm.com/documentation/den0018/a/Introduction)
