@@ -1,126 +1,69 @@
 # ARM NEON SIMD Explorations
 
-> Harvesting the existing compute power in Arm processors with the NEON coprocessor.
+> Squeezing extra speed out of Arm CPUs using the NEON coprocessor.
 
-**NEON** is Arm's Advanced SIMD (Single Instruction, Multiple Data) extension. Where a
-normal instruction operates on one value at a time, a NEON instruction operates on a whole
-vector of values packed into a 128-bit register at once — for example four 32-bit floats, or
-sixteen 8-bit bytes. An ARMv8-A core (such as the Cortex-A72) has thirty-two of these
-registers, so loops that do the same arithmetic over large arrays (image processing, DSP, physics,
-linear algebra) can run several times faster for free — using compute the CPU already has but
-that plain C leaves idle. This repo demonstrates that with four small kernels, each written
-twice — once in plain C, once in hand-written NEON intrinsics — and a benchmark that times
-the two side by side.
+This started as a college project — *"Harvesting Existing Compute Power in ARM using the NEON
+Coprocessor"* (with Eshaan and Srikar, under Dr. Sudheendra Kumar). I've since cleaned it up
+into something you can actually clone and run.
 
-This started as a student project (*"Harvesting Existing Compute power in ARM using NEON
-Coprocessor"*, mentor Dr. Sudheendra Kumar) and is now cleaned up into a small, runnable
-showcase.
+The idea is simple. Normally a CPU instruction works on one number at a time. **NEON** is Arm's
+SIMD unit — one instruction works on a whole vector at once (say four floats), using compute
+that's already sitting in the chip but that plain C usually leaves idle. So I took four common
+kernels, wrote each one twice — once in plain C, once in hand-written NEON intrinsics — and
+benchmarked them side by side to see how much faster NEON really is.
 
-## What's in this repo
+## What's inside
 
 ```
-arm-neon-simd-explorations/
-├── docs/                     # the project decks — a primary contribution (see Documentation)
-│   ├── PPT 1.pdf             # NEON / SIMD overview + worked collision example
-│   └── Arm_neon_intrinsic_library_functions.pdf   # catalogue of intrinsic categories
-├── examples/                 # the kernels, each as scalar + NEON
-│   ├── kernels.h
-│   ├── collision.c           # circle/circle collision detection (compare + mask)
-│   ├── vector_add.c          # c = a + b              (memory-bandwidth bound)
-│   ├── matrix_multiply.c     # C = A * B, 4x4 blocked (compute bound, FMA)
-│   └── fir_filter.c          # FIR convolution        (DSP multiply-accumulate)
-├── bench/
-│   └── benchmark.c           # runs every kernel, validates, times scalar vs NEON
-├── results/                  # benchmark CSV lands here
-├── Makefile
-└── README.md
+docs/        the project decks — the writeup of how and why NEON works
+examples/    the four kernels, each as a scalar and a NEON version
+  collision.c        circle vs circle collision detection
+  vector_add.c       c = a + b
+  matrix_multiply.c  C = A * B, in 4x4 blocks
+  fir_filter.c       a FIR (DSP) filter
+bench/       benchmark.c — runs every kernel, checks the two agree, times them
+results/     the numbers I measured
 ```
 
-Each kernel comes in two forms with identical results: a `*_scalar` plain-C version and a
-`*_neon` version using `arm_neon.h` intrinsics. The benchmark runs both, checks they agree,
-and reports the speedup.
+## Running it
 
-## Build & run
-
-The benchmark runs on **any Linux machine with an Arm NEON-capable CPU** (any AArch64 / 64-bit
-Arm core), where `arm_neon.h` and the NEON instructions are available out of the box. The
-results below were measured on a Raspberry Pi 4B.
+It runs on any Linux box with an Arm NEON CPU (any 64-bit Arm core) — I ran it on a Raspberry
+Pi 4B. NEON is built into 64-bit Arm, so plain `gcc` is all you need:
 
 ```sh
-git clone <your-repo-url> arm-neon-simd-explorations
-cd arm-neon-simd-explorations
 make run
 ```
 
-`make run` builds the benchmark and runs every kernel, printing a table and writing
-`results/results.csv`. Under the hood it is just:
+That builds the benchmark, runs all four kernels, and writes `results/results.csv`.
 
-```sh
-gcc -O2 -Wall -Wextra -std=c11 \
-    bench/benchmark.c examples/*.c -o benchmark -lm
-./benchmark
-```
+## Results
 
-To build a single example on its own (the classic workflow from the project deck):
+Measured on a Raspberry Pi 4B (Cortex-A72, 64-bit Linux):
 
-```sh
-gcc -O2 yourfile.c -o yourfile -lm   # AArch64: NEON needs no extra flags
-./yourfile
-```
+| Kernel          | Size                  | Scalar (ms) | NEON (ms) | Speedup |
+|-----------------|-----------------------|-------------|-----------|---------|
+| vector_add      | 1048576 elems         |       2.979 |     2.756 |   1.08x |
+| collision       | 1048576 circles       |       4.701 |     3.441 |   1.37x |
+| matrix_multiply | 256x256               |     115.377 |    10.085 |  11.44x |
+| fir_filter      | 1048561 out / 16 taps |      29.763 |     7.940 |   3.75x |
 
-### Results
+The pattern that stood out: NEON helps most when there's lots of math per byte of data.
+`matrix_multiply` flies (**11.44x**) because it's all multiply-accumulate. `vector_add` barely
+moves (**1.08x**) because it's just one add per element — the CPU is waiting on memory, not
+maths. The other two land in between.
 
-`make run` builds the benchmark, runs every kernel, and writes
-[`results/results.csv`](results/results.csv). The numbers below were measured on a **Raspberry
-Pi 4B (Cortex-A72, 64-bit Linux)**; yours will differ with hardware, kernel sizes, and compiler,
-but the *shape* — NEON pulling furthest ahead on compute-bound work — holds.
+## Docs
 
-| Kernel          | Size                  | Scalar (ms) | NEON (ms) | Speedup | Correct |
-|-----------------|-----------------------|-------------|-----------|---------|---------|
-| vector_add      | 1048576 elems         |       2.979 |     2.756 |   1.08x | yes     |
-| collision       | 1048576 circles       |       4.701 |     3.441 |   1.37x | yes     |
-| matrix_multiply | 256x256               |     115.377 |    10.085 |  11.44x | yes     |
-| fir_filter      | 1048561 out / 16 taps |      29.763 |     7.940 |   3.75x | yes     |
+The two decks in [`docs/`](docs/) are really the heart of the project — the part where we
+explain NEON properly:
 
-`vector_add` gains the least (**1.08x**): it is limited by memory bandwidth — one add per
-element, so the CPU spends its time moving data rather than computing. `matrix_multiply` gains
-the most (**11.44x**): it is compute-bound and NEON's fused multiply-accumulate does four lanes
-per instruction. `fir_filter` (**3.75x**) and `collision` (**1.37x**) fall in between, set by
-how much arithmetic each does per byte of data it loads.
+- **[`docs/PPT 1.pdf`](docs/PPT%201.pdf)** — the main presentation: what SIMD is, the ways to
+  use NEON, a step-by-step collision-detection example, and how to set it up on a Pi.
+- **[`docs/Arm_neon_intrinsic_library_functions.pdf`](docs/Arm_neon_intrinsic_library_functions.pdf)**
+  — a reference of the NEON intrinsic families (arithmetic, compare, load/store, shift, logical,
+  and so on).
 
-## Documentation
-
-Alongside the benchmark, the two decks in [`docs/`](docs/) are a primary part of this project —
-the written explanation of *how* and *why* NEON works that the code then puts into practice.
-They stand on their own as a compact introduction to programming the NEON coprocessor:
-
-- **[NEON / SIMD overview — `docs/PPT 1.pdf`](docs/PPT%201.pdf)** — *Harvesting Existing
-  Compute Power in ARM using the NEON Coprocessor.* The main presentation: what SIMD is and the
-  three execution models (SISD → vector-mode VFP → packed SIMD), vectorization, NEON compared
-  with x86 MMX/SSE and Altivec, the four ways to use NEON (auto-vectorization, intrinsics,
-  libraries, hand-written assembly), a step-by-step walk-through of the collision-detection
-  example (scalar → basic → advanced de-interleaved intrinsics), the intrinsic naming
-  convention and data types, feature macros, and tips for helping the compiler auto-vectorize.
-
-- **[Intrinsic function reference — `docs/Arm_neon_intrinsic_library_functions.pdf`](docs/Arm_neon_intrinsic_library_functions.pdf)**
-  — a categorized catalogue of the NEON intrinsic families: bit manipulation, compare, complex
-  arithmetic, load/store, shift, logical, data-type conversions, move, vector and scalar
-  arithmetic, vector manipulation, and transpose operations.
-
-The kernels in [`examples/`](examples/) are the runnable counterpart to this material.
-
-## Platform
-
-- **Where it runs:** any Linux machine with an Arm NEON-capable CPU. On AArch64 (64-bit Arm)
-  Advanced SIMD is part of the baseline ISA, so the intrinsics compile with a plain `gcc` — no
-  `-mfpu` flag needed. (On a 32-bit Arm userland you would add `-mfpu=neon -mfloat-abi=hard`;
-  see the commented line in the `Makefile`.)
-- **Where we ran it:** Raspberry Pi 4B — Broadcom BCM2711, quad-core Cortex-A72 (ARMv8-A),
-  64-bit, 2 GB RAM, running 64-bit Linux (Ubuntu Server 22.04).
-- **Memory-conscious by design:** the benchmark allocates each kernel's buffers, uses them, and
-  frees them before moving to the next kernel — peak footprint is about one kernel's working set
-  (~16 MB), which kept it comfortable even on the Pi's 2 GB. All sizes are `#define`d at the top
-  of `bench/benchmark.c` if you want to scale them.
+The code in [`examples/`](examples/) is just those ideas made runnable.
 
 ## References
 
